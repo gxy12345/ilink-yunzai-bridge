@@ -1,0 +1,26 @@
+# Yunzai-Bot WebSocket server
+yunzai:
+  host: "127.0.0.1"
+  port: 2536
+  # Reconnect interval in ms when WebSocket disconnects
+  reconnect_interval: 5000
+
+# iLink protocol settings
+ilink:
+  base_url: "https://ilinkai.weixin.qq.com"
+  cdn_base_url: "https://novac2c.cdn.weixin.qq.com/c2c"
+  channel_version: "1.0.2"
+  poll_timeout_ms: 40000
+  api_timeout_ms: 15000
+
+# Web management server
+web:
+  enabled: true
+  host: "0.0.0.0"
+  port: 3001
+
+# Data directory for tokens and session state
+data_dir: "./data"
+
+# Logging level: debug, info, warn, error
+log_level: "info"
