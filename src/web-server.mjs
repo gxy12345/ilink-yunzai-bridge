@@ -83,7 +83,15 @@ export class WebServer {
 
     if (method === "POST" && pathname === "/api/devices") {
       const body = await this._readBody(req);
-      const sessionId = body.sessionId || undefined;
+      const sessionId = typeof body.sessionId === "string" ? body.sessionId.trim() : "";
+      if (!sessionId) {
+        this._json(res, 400, { ok: false, error: "Device name is required" });
+        return;
+      }
+      if (this.deviceManager.getDevice(sessionId)) {
+        this._json(res, 409, { ok: false, error: `Device "${sessionId}" already exists` });
+        return;
+      }
       const device = await this.deviceManager.addDevice(sessionId);
       this._json(res, 200, {
         ok: true,

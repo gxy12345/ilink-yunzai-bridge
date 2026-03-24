@@ -310,8 +310,9 @@ export function renderPage() {
         <button class="close-btn" onclick="closeModal('add-modal')">&times;</button>
       </div>
       <div class="input-group">
-        <label>Device Name (optional)</label>
-        <input type="text" id="device-name" placeholder="e.g. my-clawbot-1"/>
+        <label>Device Name <span style="color:var(--danger)">*</span></label>
+        <input type="text" id="device-name" placeholder="e.g. my-clawbot-1" required/>
+        <div id="device-name-error" style="color:var(--danger);font-size:12px;margin-top:4px;display:none"></div>
       </div>
       <button class="btn btn-primary" style="width:100%" onclick="addDevice()">Create &amp; Generate QR</button>
     </div>
@@ -337,6 +338,7 @@ export function renderPage() {
   <script>
     let qrPollTimer = null;
     let activeQrDevice = null;
+    let cachedDevices = [];
 
     function esc(s) {
       return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -411,12 +413,14 @@ export function renderPage() {
 
     async function refreshAll() {
       const data = await api('GET', '/devices');
-      renderDevices(data.devices);
+      cachedDevices = data.devices || [];
+      renderDevices(cachedDevices);
       renderStats(data.stats);
     }
 
     function openAddModal() {
       document.getElementById('device-name').value = '';
+      showNameError('');
       document.getElementById('add-modal').showModal();
     }
 
@@ -431,14 +435,38 @@ export function renderPage() {
       refreshAll();
     }
 
+    function showNameError(msg) {
+      const el = document.getElementById('device-name-error');
+      if (msg) { el.textContent = msg; el.style.display = 'block'; }
+      else { el.textContent = ''; el.style.display = 'none'; }
+    }
+
     async function addDevice() {
-      const name = document.getElementById('device-name').value.trim() || undefined;
-      closeModal('add-modal');
-      const data = await api('POST', '/devices', { sessionId: name });
-      if (data.ok) {
-        activeQrDevice = data.sessionId;
-        await doLogin(data.sessionId);
+      const input = document.getElementById('device-name');
+      const name = input.value.trim();
+      showNameError('');
+
+      if (!name) {
+        showNameError('Device name is required.');
+        input.focus();
+        return;
       }
+
+      if (cachedDevices && cachedDevices.some(d => d.sessionId === name)) {
+        showNameError('A device with this name already exists.');
+        input.focus();
+        return;
+      }
+
+      const data = await api('POST', '/devices', { sessionId: name });
+      if (!data.ok) {
+        showNameError(data.error || 'Failed to create device.');
+        return;
+      }
+
+      closeModal('add-modal');
+      activeQrDevice = data.sessionId;
+      await doLogin(data.sessionId);
     }
 
     async function startLogin(sessionId) {
