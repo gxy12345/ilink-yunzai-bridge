@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { logger } from "./logger.mjs";
