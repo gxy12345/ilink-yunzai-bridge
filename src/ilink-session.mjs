@@ -134,6 +134,7 @@ export class ILinkSession {
 
       if (statusData.status === "confirmed" || statusData.bot_token) {
         this._qrStatus = "confirmed";
+        this._qrKey = null;
         this.token = statusData.bot_token;
         this.baseUrl = statusData.baseurl || null;
         this.botId = statusData.bot_id || this.sessionId;

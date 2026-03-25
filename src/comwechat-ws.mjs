@@ -43,20 +43,27 @@ export class ComWeChatWsClient {
     this.shouldReconnect = true;
 
     logger.info(this.tag, `Connecting to ${this.url}`);
-    this.ws = new WebSocket(this.url);
+    const ws = new WebSocket(this.url);
+    this.ws = ws;
 
-    this.ws.on("open", () => {
+    ws.on("open", () => {
+      if (this.ws !== ws) {
+        ws.close();
+        return;
+      }
       this.connected = true;
       logger.info(this.tag, "Connected to Yunzai");
       this._sendStatusUpdate();
       this._startHeartbeat();
     });
 
-    this.ws.on("message", (data) => {
+    ws.on("message", (data) => {
+      if (this.ws !== ws) return;
       this._handleMessage(data);
     });
 
-    this.ws.on("close", (code, reason) => {
+    ws.on("close", (code, reason) => {
+      if (this.ws !== ws) return;
       this.connected = false;
       this._stopHeartbeat();
       logger.warn(this.tag, `Disconnected: ${code} ${reason}`);
@@ -66,7 +73,7 @@ export class ComWeChatWsClient {
       }
     });
 
-    this.ws.on("error", (err) => {
+    ws.on("error", (err) => {
       logger.error(this.tag, "WebSocket error:", err.message);
     });
   }
@@ -78,11 +85,12 @@ export class ComWeChatWsClient {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
-    }
+    const ws = this.ws;
+    this.ws = null;
     this.connected = false;
+    if (ws) {
+      try { ws.close(); } catch {}
+    }
   }
 
   sendEvent(event) {

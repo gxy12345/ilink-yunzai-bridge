@@ -155,6 +155,10 @@ export class WebServer {
         this._json(res, 404, { error: "Device not found" });
         return;
       }
+      if (device.isRunning) {
+        this._json(res, 200, { ok: true, status: device.status, message: "Already running" });
+        return;
+      }
       const started = await device.start();
       this._json(res, 200, { ok: started, status: device.status });
       return;

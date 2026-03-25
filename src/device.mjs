@@ -45,6 +45,12 @@ export class Device {
       return false;
     }
 
+    if (this.wsClient) {
+      logger.info(this.tag, "Cleaning up existing WS connection before restart");
+      this.wsClient.disconnect();
+      this.wsClient = null;
+    }
+
     logger.info(this.tag, `Starting device, bot_id: ${this.botId}`);
     this.status = "starting";
 
@@ -62,9 +68,11 @@ export class Device {
       }
     };
 
-    this.ilinkSession.startPolling((msg, session) =>
-      this._handleILinkMessage(msg, session)
-    );
+    if (!this.ilinkSession.running) {
+      this.ilinkSession.startPolling((msg, session) =>
+        this._handleILinkMessage(msg, session)
+      );
+    }
 
     this.status = "running";
     logger.info(this.tag, "Device started successfully");
@@ -85,8 +93,12 @@ export class Device {
 
   async pollQrStatus() {
     const result = await this.ilinkSession.pollQrStatus();
-    if (result.status === "confirmed") {
-      setTimeout(() => this.start(), 500);
+    if (result.status === "confirmed" && !this._startScheduled) {
+      this._startScheduled = true;
+      setTimeout(() => {
+        this._startScheduled = false;
+        this.start();
+      }, 500);
     }
     return result;
   }
