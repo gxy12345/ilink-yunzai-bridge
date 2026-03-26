@@ -2,15 +2,18 @@ import { createServer } from "node:http";
 import QRCode from "qrcode";
 import { logger } from "./logger.mjs";
 import { renderPage } from "./web-page.mjs";
+import { renderInvitePage, renderInviteExpiredPage } from "./invite-page.mjs";
 
 /**
  * HTTP server providing a management web UI and REST API for device management.
+ * Also serves public invite pages for self-service device binding.
  */
 export class WebServer {
   constructor(webConfig, deviceManager) {
     this.host = webConfig.host;
     this.port = webConfig.port;
     this.enabled = webConfig.enabled;
+    this.inviteHost = webConfig.invite_host || "";
     this.deviceManager = deviceManager;
     this.server = null;
   }
@@ -43,6 +46,14 @@ export class WebServer {
     await new Promise((resolve) => s.close(resolve));
   }
 
+  _getInviteUrl(token) {
+    if (this.inviteHost) {
+      return `${this.inviteHost.replace(/\/+$/, "")}/invite/${token}`;
+    }
+    const h = this.host === "0.0.0.0" ? "localhost" : this.host;
+    return `http://${h}:${this.port}/invite/${token}`;
+  }
+
   async _handle(req, res) {
     const url = new URL(req.url || "/", `http://${this.host}:${this.port}`);
     const method = req.method;
@@ -57,6 +68,97 @@ export class WebServer {
       res.end();
       return;
     }
+
+    // --- Invite page routes (public-facing, no admin operations) ---
+
+    const invitePageMatch = pathname.match(/^\/invite\/([^/]+)$/);
+    if (invitePageMatch && method === "GET") {
+      const token = decodeURIComponent(invitePageMatch[1]);
+      const invite = this.deviceManager.getInviteByToken(token);
+      if (!invite) {
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.end(renderInviteExpiredPage());
+        return;
+      }
+      const device = this.deviceManager.getDevice(invite.sessionId);
+      if (!device) {
+        this.deviceManager.invalidateInviteForDevice(invite.sessionId);
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.end(renderInviteExpiredPage());
+        return;
+      }
+      if (device.isRunning) {
+        this.deviceManager.invalidateInviteForDevice(invite.sessionId);
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.end(renderInviteExpiredPage());
+        return;
+      }
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.end(renderInvitePage(invite.sessionId));
+      return;
+    }
+
+    const inviteLoginMatch = pathname.match(/^\/invite\/([^/]+)\/login$/);
+    if (inviteLoginMatch && method === "POST") {
+      const token = decodeURIComponent(inviteLoginMatch[1]);
+      const invite = this.deviceManager.getInviteByToken(token);
+      if (!invite) {
+        this._json(res, 200, { expired: true, error: "Invite link expired" });
+        return;
+      }
+      const device = this.deviceManager.getDevice(invite.sessionId);
+      if (!device) {
+        this._json(res, 200, { expired: true, error: "Device not found" });
+        return;
+      }
+      if (device.isRunning) {
+        this.deviceManager.invalidateInviteForDevice(invite.sessionId);
+        this._json(res, 200, { expired: true, error: "Device already bound" });
+        return;
+      }
+      try {
+        const result = await device.startQrLogin();
+        let qrImageDataUrl = null;
+        if (result.qrcodeUrl) {
+          qrImageDataUrl = await QRCode.toDataURL(result.qrcodeUrl, {
+            width: 300,
+            margin: 2,
+            color: { dark: "#000000", light: "#ffffff" },
+          });
+        }
+        this._json(res, 200, { ...result, qrImageDataUrl });
+      } catch (err) {
+        this._json(res, 500, { error: err.message });
+      }
+      return;
+    }
+
+    const inviteQrStatusMatch = pathname.match(/^\/invite\/([^/]+)\/qr-status$/);
+    if (inviteQrStatusMatch && method === "GET") {
+      const token = decodeURIComponent(inviteQrStatusMatch[1]);
+      const invite = this.deviceManager.getInviteByToken(token);
+      if (!invite) {
+        this._json(res, 200, { status: "error", message: "Invite link expired" });
+        return;
+      }
+      const device = this.deviceManager.getDevice(invite.sessionId);
+      if (!device) {
+        this._json(res, 200, { status: "error", message: "Device not found" });
+        return;
+      }
+      const result = await device.pollQrStatus();
+      if (result.status === "confirmed") {
+        this.deviceManager.invalidateInviteForDevice(invite.sessionId);
+      }
+      this._json(res, 200, result);
+      return;
+    }
+
+    // --- Admin routes ---
 
     if (method === "GET" && pathname === "/") {
       res.statusCode = 200;
@@ -74,8 +176,14 @@ export class WebServer {
     }
 
     if (method === "GET" && pathname === "/api/devices") {
+      const devices = this.deviceManager.listDevices();
+      for (const d of devices) {
+        if (d.inviteToken) {
+          d.inviteUrl = this._getInviteUrl(d.inviteToken);
+        }
+      }
       this._json(res, 200, {
-        devices: this.deviceManager.listDevices(),
+        devices,
         stats: this.deviceManager.getStats(),
       });
       return;
@@ -106,6 +214,20 @@ export class WebServer {
       const sessionId = decodeURIComponent(deviceMatch[1]);
       const removed = this.deviceManager.removeDevice(sessionId);
       this._json(res, 200, { ok: removed });
+      return;
+    }
+
+    const inviteApiMatch = pathname.match(/^\/api\/devices\/([^/]+)\/invite$/);
+    if (inviteApiMatch && method === "POST") {
+      const sessionId = decodeURIComponent(inviteApiMatch[1]);
+      const device = this.deviceManager.getDevice(sessionId);
+      if (!device) {
+        this._json(res, 404, { ok: false, error: "Device not found" });
+        return;
+      }
+      const token = this.deviceManager.createInvite(sessionId);
+      const inviteUrl = this._getInviteUrl(token);
+      this._json(res, 200, { ok: true, inviteToken: token, inviteUrl });
       return;
     }
 
@@ -143,6 +265,9 @@ export class WebServer {
         return;
       }
       const result = await device.pollQrStatus();
+      if (result.status === "confirmed") {
+        this.deviceManager.invalidateInviteForDevice(sessionId);
+      }
       this._json(res, 200, result);
       return;
     }

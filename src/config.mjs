@@ -18,6 +18,7 @@ const DEFAULTS = {
     enabled: true,
     host: "0.0.0.0",
     port: 3001,
+    invite_host: "",
   },
   data_dir: "./data",
   log_level: "info",

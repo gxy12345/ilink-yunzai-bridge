@@ -18,6 +18,10 @@ web:
   enabled: true
   host: "0.0.0.0"
   port: 3001
+  # Public-facing host for invite links (e.g. "https://your-domain.com")
+  # Used to generate shareable device binding URLs accessible from public network
+  # Leave empty to use the server's own address
+  # invite_host: "https://your-domain.com"
 
 # Data directory for tokens and session state
 data_dir: "./data"

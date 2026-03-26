@@ -314,9 +314,31 @@ export function renderPage() {
         <input type="text" id="device-name" placeholder="e.g. my-clawbot-1" required/>
         <div id="device-name-error" style="color:var(--danger);font-size:12px;margin-top:4px;display:none"></div>
       </div>
-      <button class="btn btn-primary" style="width:100%" onclick="addDevice()">Create &amp; Generate QR</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary" style="flex:1" onclick="addDevice()">Create &amp; Scan QR</button>
+        <button class="btn btn-ghost" style="flex:1" onclick="addDeviceWithInvite()">Create &amp; Share Link</button>
+      </div>
     </div>
   </dialog>
+
+  <dialog id="invite-modal">
+    <div class="modal">
+      <div class="modal-head">
+        <h2>Invite Link</h2>
+        <button class="close-btn" onclick="closeModal('invite-modal')">&times;</button>
+      </div>
+      <p style="margin-bottom:12px;color:var(--muted);font-size:14px;line-height:1.5">
+        Share this link with the user to self-service bind their device:
+      </p>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="text" id="invite-url-display" readonly style="flex:1;padding:10px 14px;background:var(--bg);border:1px solid var(--border);border-radius:10px;color:var(--text);font:inherit;font-size:13px"/>
+        <button class="btn btn-primary btn-sm" onclick="copyFromInviteModal()">Copy</button>
+      </div>
+      <div id="invite-copy-feedback" style="color:var(--success);font-size:12px;margin-top:6px;display:none">Copied!</div>
+    </div>
+  </dialog>
+
+  <div id="toast" style="position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--surface);color:var(--text);padding:12px 24px;border-radius:10px;font-size:14px;display:none;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,0.4);border:1px solid var(--border)"></div>
 
   <dialog id="qr-modal">
     <div class="modal">
@@ -398,6 +420,11 @@ export function renderPage() {
           + (d.status === 'stopped'
             ? '<button class="btn btn-ghost btn-sm" onclick="startDevice(\\'' + esc(d.sessionId) + '\\')">Start</button>'
             : '')
+          + (d.inviteUrl
+            ? '<button class="btn btn-ghost btn-sm" onclick="copyInviteLink(\\'' + esc(d.inviteUrl) + '\\')">Copy Link</button>'
+            : (d.status !== 'running'
+              ? '<button class="btn btn-ghost btn-sm" onclick="generateInviteForDevice(\\'' + esc(d.sessionId) + '\\')">Share</button>'
+              : ''))
           + '<button class="btn btn-ghost btn-sm" onclick="removeDevice(\\'' + esc(d.sessionId) + '\\')">Remove</button>'
           + '</div>'
           + '</div>';
@@ -441,22 +468,33 @@ export function renderPage() {
       else { el.textContent = ''; el.style.display = 'none'; }
     }
 
-    async function addDevice() {
+    function showToast(msg) {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.style.display = 'block';
+      setTimeout(() => { el.style.display = 'none'; }, 3000);
+    }
+
+    function validateDeviceName() {
       const input = document.getElementById('device-name');
       const name = input.value.trim();
       showNameError('');
-
       if (!name) {
         showNameError('Device name is required.');
         input.focus();
-        return;
+        return null;
       }
-
       if (cachedDevices && cachedDevices.some(d => d.sessionId === name)) {
         showNameError('A device with this name already exists.');
         input.focus();
-        return;
+        return null;
       }
+      return name;
+    }
+
+    async function addDevice() {
+      const name = validateDeviceName();
+      if (!name) return;
 
       const data = await api('POST', '/devices', { sessionId: name });
       if (!data.ok) {
@@ -467,6 +505,68 @@ export function renderPage() {
       closeModal('add-modal');
       activeQrDevice = data.sessionId;
       await doLogin(data.sessionId);
+    }
+
+    async function addDeviceWithInvite() {
+      const name = validateDeviceName();
+      if (!name) return;
+
+      const createData = await api('POST', '/devices', { sessionId: name });
+      if (!createData.ok) {
+        showNameError(createData.error || 'Failed to create device.');
+        return;
+      }
+
+      const inviteData = await api('POST', '/devices/' + encodeURIComponent(name) + '/invite');
+      if (!inviteData.ok) {
+        showNameError(inviteData.error || 'Failed to generate invite link.');
+        return;
+      }
+
+      closeModal('add-modal');
+      showInviteModal(inviteData.inviteUrl);
+      refreshAll();
+    }
+
+    function showInviteModal(url) {
+      document.getElementById('invite-url-display').value = url;
+      document.getElementById('invite-copy-feedback').style.display = 'none';
+      document.getElementById('invite-modal').showModal();
+    }
+
+    async function copyFromInviteModal() {
+      const url = document.getElementById('invite-url-display').value;
+      await copyToClipboard(url);
+      document.getElementById('invite-copy-feedback').style.display = 'block';
+      setTimeout(() => { document.getElementById('invite-copy-feedback').style.display = 'none'; }, 2000);
+    }
+
+    async function copyInviteLink(url) {
+      await copyToClipboard(url);
+      showToast('Invite link copied!');
+    }
+
+    async function copyToClipboard(text) {
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+    }
+
+    async function generateInviteForDevice(sessionId) {
+      const data = await api('POST', '/devices/' + encodeURIComponent(sessionId) + '/invite');
+      if (data.ok) {
+        showInviteModal(data.inviteUrl);
+        refreshAll();
+      }
     }
 
     async function startLogin(sessionId) {

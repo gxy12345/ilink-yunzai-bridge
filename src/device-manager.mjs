@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { logger } from "./logger.mjs";
@@ -14,8 +15,11 @@ export class DeviceManager {
     this.dataDir = dataDir;
     this.ilinkConfig = ilinkConfig || {};
     this.devices = new Map();
+    this.invites = new Map();
+    this.deviceInvites = new Map();
 
     mkdirSync(path.join(dataDir, "accounts"), { recursive: true });
+    this._loadInvites();
   }
 
   get tag() {
@@ -87,6 +91,7 @@ export class DeviceManager {
       device.stop();
       this.devices.delete(sessionId);
       this._deleteAccountFiles(sessionId);
+      this.invalidateInviteForDevice(sessionId);
       logger.info(this.tag, `Removed device: ${sessionId}`);
       return true;
     }
@@ -109,7 +114,9 @@ export class DeviceManager {
   listDevices() {
     const list = [];
     for (const [id, device] of this.devices) {
-      list.push(device.toJSON());
+      const json = device.toJSON();
+      json.inviteToken = this.getInviteTokenForDevice(id) || null;
+      list.push(json);
     }
     return list;
   }
@@ -136,5 +143,62 @@ export class DeviceManager {
       needsLogin,
       stopped,
     };
+  }
+
+  createInvite(sessionId) {
+    const existing = this.deviceInvites.get(sessionId);
+    if (existing) return existing;
+
+    const token = crypto.randomUUID();
+    this.invites.set(token, { sessionId, createdAt: new Date().toISOString() });
+    this.deviceInvites.set(sessionId, token);
+    this._saveInvites();
+    logger.info(this.tag, `Invite created for ${sessionId}: ${token}`);
+    return token;
+  }
+
+  getInviteByToken(token) {
+    return this.invites.get(token) || null;
+  }
+
+  getInviteTokenForDevice(sessionId) {
+    return this.deviceInvites.get(sessionId) || null;
+  }
+
+  invalidateInviteForDevice(sessionId) {
+    const token = this.deviceInvites.get(sessionId);
+    if (token) {
+      this.invites.delete(token);
+      this.deviceInvites.delete(sessionId);
+      this._saveInvites();
+      logger.info(this.tag, `Invite invalidated for ${sessionId}`);
+    }
+  }
+
+  get _invitesFilePath() {
+    return path.join(this.dataDir, "invites.json");
+  }
+
+  _loadInvites() {
+    try {
+      if (!existsSync(this._invitesFilePath)) return;
+      const data = JSON.parse(readFileSync(this._invitesFilePath, "utf-8"));
+      for (const [token, info] of Object.entries(data)) {
+        this.invites.set(token, info);
+        this.deviceInvites.set(info.sessionId, token);
+      }
+      logger.info(this.tag, `Loaded ${this.invites.size} invite(s)`);
+    } catch (err) {
+      logger.warn(this.tag, `Failed to load invites: ${err.message}`);
+    }
+  }
+
+  _saveInvites() {
+    try {
+      const data = Object.fromEntries(this.invites);
+      writeFileSync(this._invitesFilePath, JSON.stringify(data, null, 2));
+    } catch (err) {
+      logger.warn(this.tag, `Failed to save invites: ${err.message}`);
+    }
   }
 }
