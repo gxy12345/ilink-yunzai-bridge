@@ -51,7 +51,7 @@ export class WebServer {
       return `${this.inviteHost.replace(/\/+$/, "")}/invite/${token}`;
     }
     const h = this.host === "0.0.0.0" ? "localhost" : this.host;
-    return `http://${h}/invite/${token}`;
+    return `http://${h}:${this.port}/invite/${token}`;
   }
 
   async _handle(req, res) {

@@ -9,9 +9,9 @@ import { Device } from "./device.mjs";
  * Handles device lifecycle, persistence, and lookup.
  */
 export class DeviceManager {
-  constructor(ilinkClient, yunzaiConfig, dataDir, ilinkConfig) {
+  constructor(ilinkClient, backends, dataDir, ilinkConfig) {
     this.ilinkClient = ilinkClient;
-    this.yunzaiConfig = yunzaiConfig;
+    this.backends = backends;
     this.dataDir = dataDir;
     this.ilinkConfig = ilinkConfig || {};
     this.devices = new Map();
@@ -59,7 +59,7 @@ export class DeviceManager {
   _createDevice(sessionId) {
     const device = new Device(
       this.ilinkClient,
-      this.yunzaiConfig,
+      this.backends,
       this.dataDir,
       sessionId,
       this.ilinkConfig

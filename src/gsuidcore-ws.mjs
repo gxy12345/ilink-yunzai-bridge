@@ -1,43 +1,42 @@
 import WebSocket from "ws";
-import crypto from "node:crypto";
 import { logger } from "./logger.mjs";
-import {
-  buildStatusUpdateEvent,
-  buildHeartbeatEvent,
-  buildApiResponse,
-  comWeChatToILinkItems,
-} from "./translator.mjs";
 
 /**
- * WebSocket client that connects to Yunzai-Bot's ComWeChat adapter endpoint.
+ * WebSocket client that connects to gsuid_core's endpoint.
  *
- * One instance per iLink device. Speaks the ComWeChat protocol:
- * - Sends events (meta, message, notice) to Yunzai
- * - Receives API requests (action/params/echo) from Yunzai and dispatches them
+ * gsuid_core protocol:
+ * - Endpoint:  ws://host:port/ws/{bot_id}?token=xxx
+ * - Upstream:  MessageReceive (JSON bytes via send)
+ * - Downstream: MessageSend   (JSON bytes received)
+ *
+ * Unlike ComWeChat, gsuid_core has no action/echo API model.
+ * It only has: push events upstream → receive reply messages downstream.
  */
-export class ComWeChatWsClient {
+export class GsuidCoreWsClient {
   constructor(backendConfig, botId) {
-    this.backendName = backendConfig.name || "yunzai";
+    this.backendName = backendConfig.name || "gsuid-core";
     this.host = backendConfig.host;
     this.port = backendConfig.port;
-    this.path = backendConfig.path || "/ComWeChat";
+    this.gsBotId = backendConfig.bot_id || "wechat";
+    this.token = backendConfig.token || "";
     this.reconnectInterval = backendConfig.reconnect_interval || 5000;
     this.botId = botId;
     this.ws = null;
     this.connected = false;
     this.shouldReconnect = true;
-    this.heartbeatTimer = null;
     this.reconnectTimer = null;
 
-    this.onApiRequest = null;
+    /** Called when gsuid_core sends a MessageSend reply */
+    this.onSendMessage = null;
   }
 
   get tag() {
-    return `WS:${this.botId}@${this.backendName}`;
+    return `GS:${this.botId}@${this.backendName}`;
   }
 
   get url() {
-    return `ws://${this.host}:${this.port}${this.path}`;
+    const base = `ws://${this.host}:${this.port}/ws/${encodeURIComponent(this.gsBotId)}`;
+    return this.token ? `${base}?token=${encodeURIComponent(this.token)}` : base;
   }
 
   connect() {
@@ -54,9 +53,7 @@ export class ComWeChatWsClient {
         return;
       }
       this.connected = true;
-      logger.info(this.tag, "Connected to Yunzai");
-      this._sendStatusUpdate();
-      this._startHeartbeat();
+      logger.info(this.tag, "Connected to gsuid_core");
     });
 
     ws.on("message", (data) => {
@@ -67,7 +64,6 @@ export class ComWeChatWsClient {
     ws.on("close", (code, reason) => {
       if (this.ws !== ws) return;
       this.connected = false;
-      this._stopHeartbeat();
       logger.warn(this.tag, `Disconnected: ${code} ${reason}`);
       this.ws = null;
       if (this.shouldReconnect) {
@@ -82,7 +78,6 @@ export class ComWeChatWsClient {
 
   disconnect() {
     this.shouldReconnect = false;
-    this._stopHeartbeat();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -95,40 +90,19 @@ export class ComWeChatWsClient {
     }
   }
 
-  sendEvent(event) {
+  /**
+   * Send a MessageReceive object to gsuid_core.
+   * gsuid_core expects bytes (msgspec JSON), which is equivalent to JSON bytes.
+   */
+  sendEvent(messageReceive) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       logger.warn(this.tag, "Cannot send event: not connected");
       return false;
     }
-    const data = JSON.stringify(event);
-    logger.debug(this.tag, `→ Yunzai: ${data.slice(0, 200)}`);
-    this.ws.send(data);
+    const buf = Buffer.from(JSON.stringify(messageReceive));
+    logger.debug(this.tag, `→ gsuid_core: ${buf.toString().slice(0, 200)}`);
+    this.ws.send(buf);
     return true;
-  }
-
-  sendApiResponse(echo, retcode, data, message) {
-    return this.sendEvent(buildApiResponse(echo, retcode, data, message));
-  }
-
-  _sendStatusUpdate() {
-    const event = buildStatusUpdateEvent(this.botId);
-    this.sendEvent(event);
-  }
-
-  _startHeartbeat() {
-    this._stopHeartbeat();
-    this.heartbeatTimer = setInterval(() => {
-      if (this.connected) {
-        this.sendEvent(buildHeartbeatEvent(this.botId));
-      }
-    }, 30000);
-  }
-
-  _stopHeartbeat() {
-    if (this.heartbeatTimer) {
-      clearInterval(this.heartbeatTimer);
-      this.heartbeatTimer = null;
-    }
   }
 
   _scheduleReconnect() {
@@ -140,6 +114,9 @@ export class ComWeChatWsClient {
     }, this.reconnectInterval);
   }
 
+  /**
+   * gsuid_core sends MessageSend as JSON bytes.
+   */
   _handleMessage(rawData) {
     let data;
     try {
@@ -149,15 +126,10 @@ export class ComWeChatWsClient {
       return;
     }
 
-    logger.debug(this.tag, `← Yunzai: ${JSON.stringify(data).slice(0, 200)}`);
+    logger.debug(this.tag, `← gsuid_core: ${JSON.stringify(data).slice(0, 300)}`);
 
-    if (!data.action || !data.echo) {
-      logger.warn(this.tag, "Unknown message format:", JSON.stringify(data).slice(0, 200));
-      return;
-    }
-
-    if (this.onApiRequest) {
-      this.onApiRequest(data.action, data.params || {}, data.echo);
+    if (this.onSendMessage) {
+      this.onSendMessage(data);
     }
   }
 }

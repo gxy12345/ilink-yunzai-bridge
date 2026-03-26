@@ -387,6 +387,26 @@ export function renderPage() {
       return status;
     }
 
+    function backendTypeLabel(type) {
+      if (type === 'gsuidcore') return 'GS';
+      return 'CW';
+    }
+
+    function renderBackendStatus(backends) {
+      if (!backends || backends.length === 0) return 'No backends';
+      if (backends.length === 1) {
+        const b = backends[0];
+        return '<span style="color:' + (b.connected ? 'var(--success)' : 'var(--danger)') + '">'
+          + '<span style="font-size:10px;opacity:0.7">[' + backendTypeLabel(b.type) + ']</span> '
+          + esc(b.name) + ': ' + (b.connected ? 'Connected' : 'Disconnected') + '</span>';
+      }
+      return backends.map(b =>
+        '<span style="display:inline-block;margin-right:8px;color:' + (b.connected ? 'var(--success)' : 'var(--danger)') + '">'
+        + '<span style="font-size:10px;opacity:0.7">[' + backendTypeLabel(b.type) + ']</span> '
+        + esc(b.name) + ': ' + (b.connected ? '●' : '○') + '</span>'
+      ).join('');
+    }
+
     function renderDevices(devices) {
       const el = document.getElementById('device-list');
       if (!devices || devices.length === 0) {
@@ -407,7 +427,7 @@ export function renderPage() {
           + '<dl class="device-meta">'
           + '<dt>Bot ID</dt><dd>' + esc(d.botId || '-') + '</dd>'
           + '<dt>Login</dt><dd>' + esc(loginTime) + '</dd>'
-          + '<dt>WS</dt><dd>' + (d.wsConnected ? 'Connected' : 'Disconnected') + '</dd>'
+          + '<dt>Backends</dt><dd>' + renderBackendStatus(d.backends) + '</dd>'
           + '<dt>Contacts</dt><dd>' + (d.ilink?.contextTokenCount || 0) + '</dd>'
           + '</dl>'
           + '<div class="device-actions">'

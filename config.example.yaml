@@ -1,9 +1,31 @@
-# Yunzai-Bot WebSocket server
-yunzai:
-  host: "127.0.0.1"
-  port: 2536
-  # Reconnect interval in ms when WebSocket disconnects
-  reconnect_interval: 5000
+# Backend WebSocket servers
+# Messages from iLink are broadcast to all backends in order.
+# Each backend independently receives messages and can send replies.
+#
+# Option A: Single backend (legacy format)
+# yunzai:
+#   host: "127.0.0.1"
+#   port: 2536
+#   reconnect_interval: 5000
+#
+# Option B: Multi-backend format
+backends:
+  # ComWeChat backend (Yunzai-Bot)
+  - name: "yunzai"
+    type: "comwechat"            # ComWeChat protocol (default if omitted)
+    host: "127.0.0.1"
+    port: 2536
+    path: "/ComWeChat"           # WebSocket endpoint path
+    reconnect_interval: 5000
+
+  # gsuid_core backend (早柚核心) - uncomment to enable
+  # - name: "gsuid-core"
+  #   type: "gsuidcore"          # gsuid_core protocol
+  #   host: "127.0.0.1"
+  #   port: 8765                 # gsuid_core default port
+  #   bot_id: "wechat"           # bot_id in the WS path /ws/{bot_id}
+  #   token: ""                  # WS_TOKEN authentication (empty for local)
+  #   reconnect_interval: 5000
 
 # iLink protocol settings
 ilink:

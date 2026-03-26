@@ -1,12 +1,25 @@
 import { readFileSync, existsSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 
+const COMWECHAT_DEFAULTS = {
+  type: "comwechat",
+  host: "127.0.0.1",
+  port: 2536,
+  reconnect_interval: 5000,
+  path: "/ComWeChat",
+};
+
+const GSUIDCORE_DEFAULTS = {
+  type: "gsuidcore",
+  host: "127.0.0.1",
+  port: 8765,
+  reconnect_interval: 5000,
+  bot_id: "wechat",
+  token: "",
+};
+
 const DEFAULTS = {
-  yunzai: {
-    host: "127.0.0.1",
-    port: 2536,
-    reconnect_interval: 5000,
-  },
+  backends: [],
   ilink: {
     base_url: "https://ilinkai.weixin.qq.com",
     cdn_base_url: "https://novac2c.cdn.weixin.qq.com/c2c",
@@ -42,11 +55,45 @@ function deepMerge(target, source) {
   return result;
 }
 
+/**
+ * Normalizes backend configuration: supports both the legacy single-backend
+ * `yunzai` format and the new multi-backend `backends` array.
+ */
+function getBackendDefaults(type) {
+  if (type === "gsuidcore") return GSUIDCORE_DEFAULTS;
+  return COMWECHAT_DEFAULTS;
+}
+
+function normalizeBackends(userConfig) {
+  if (Array.isArray(userConfig.backends) && userConfig.backends.length > 0) {
+    return userConfig.backends.map((b, i) => {
+      const defaults = getBackendDefaults(b.type);
+      return {
+        ...defaults,
+        name: b.name || `backend-${i + 1}`,
+        ...b,
+      };
+    });
+  }
+
+  if (userConfig.yunzai) {
+    return [{
+      ...COMWECHAT_DEFAULTS,
+      name: "yunzai",
+      ...userConfig.yunzai,
+    }];
+  }
+
+  return [{ ...COMWECHAT_DEFAULTS, name: "yunzai" }];
+}
+
 export function loadConfig(configPath = "./config.yaml") {
   let userConfig = {};
   if (existsSync(configPath)) {
     const raw = readFileSync(configPath, "utf-8");
     userConfig = parseYaml(raw) || {};
   }
-  return deepMerge(DEFAULTS, userConfig);
+  const config = deepMerge(DEFAULTS, userConfig);
+  config.backends = normalizeBackends(userConfig);
+  return config;
 }

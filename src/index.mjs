@@ -18,11 +18,18 @@ async function main() {
 
   const dataDir = path.resolve(config.data_dir);
   logger.info("Main", `Data directory: ${dataDir}`);
-  logger.info("Main", `Yunzai target: ws://${config.yunzai.host}:${config.yunzai.port}/ComWeChat`);
+  logger.info("Main", `Backends (${config.backends.length}):`);
+  for (const b of config.backends) {
+    if (b.type === "gsuidcore") {
+      logger.info("Main", `  [${b.name}] (gsuidcore) ws://${b.host}:${b.port}/ws/${b.bot_id || "wechat"}`);
+    } else {
+      logger.info("Main", `  [${b.name}] (comwechat) ws://${b.host}:${b.port}${b.path || "/ComWeChat"}`);
+    }
+  }
   logger.info("Main", `iLink base: ${config.ilink.base_url}`);
 
   const ilinkClient = new ILinkClient(config.ilink);
-  const deviceManager = new DeviceManager(ilinkClient, config.yunzai, dataDir, config.ilink);
+  const deviceManager = new DeviceManager(ilinkClient, config.backends, dataDir, config.ilink);
 
   await deviceManager.initialize();
 
